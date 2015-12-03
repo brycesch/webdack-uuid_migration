@@ -24,6 +24,28 @@ module Webdack
         execute %Q{DROP SEQUENCE IF EXISTS #{table}_#{column}_seq} rescue nil
       end
 
+      # Converts primary key from UUID to Serial Integer, migrates all data by removing left padding 0's
+      #
+      # @param table [Symbol]
+      # @param options [hash]
+      # @option options [Symbol] :primary_key if not supplied queries the schema (should work most of the times)
+      # @option options [String] :default mechanism to generate UUID for new records, default uuid_generate_v4(),
+      #           which is Rails 4.0.0 default as well
+      # @return [none]
+      def primary_key_to_integer(table, options={})
+        column= connection.primary_key(table)
+        default= options[:default] || "nextval('#{table}_#{column}_seq'::regclass)"
+
+        execute %Q{DROP SEQUENCE IF EXISTS #{table}_#{column}_seq} rescue nil
+        execute %Q{CREATE SEQUENCE #{table}_#{column}_seq} rescue nil
+
+        execute %Q{ALTER TABLE #{table}
+                 ALTER COLUMN #{column} DROP DEFAULT,
+                 ALTER COLUMN #{column} SET DATA TYPE INTEGER USING (#{to_integer_pg(column)}),
+                 ALTER COLUMN #{column} SET DEFAULT #{default}}
+
+      end
+
       # Converts a column to UUID, migrates all data by left padding with 0's
       #
       # @param table [Symbol]
@@ -35,6 +57,17 @@ module Webdack
                  ALTER COLUMN #{column} SET DATA TYPE UUID USING (#{to_uuid_pg(column)})}
       end
 
+      # Converts a column to integer, migrates all data by removing left padding 0's
+      #
+      # @param table [Symbol]
+      # @param column [Symbol]
+      #
+      # @return [none]
+      def column_to_integer(table, column)
+        execute %Q{ALTER TABLE #{table}
+                 ALTER COLUMN #{column} SET DATA TYPE INTEGER USING (#{to_integer_pg(column)})}
+      end
+
       # Converts columns to UUID, migrates all data by left padding with 0's
       #
       # @param table [Symbol]
@@ -44,6 +77,18 @@ module Webdack
       def columns_to_uuid(table, *columns)
         columns.each do |column|
           column_to_uuid(table, column)
+        end
+      end
+
+      # Converts columns to UUID, migrates all data by left padding with 0's
+      #
+      # @param table [Symbol]
+      # @param columns
+      #
+      # @return [none]
+      def columns_to_integer(table, *columns)
+        columns.each do |column|
+          column_to_integer(table, column)
         end
       end
 
@@ -73,13 +118,22 @@ module Webdack
       end
 
       private
-      # Prepare a fragment that can be used in SQL statements that converts teh data value
+      # Prepare a fragment that can be used in SQL statements that converts the data value
       # from integer, string, or UUID to valid UUID string as per Postgres guidelines
       #
       # @param column [Symbol]
       # @return [String]
       def to_uuid_pg(column)
         "uuid(lpad(replace(text(#{column}),'-',''), 32, '0'))"
+      end
+
+      # Prepare a fragment that can be used in SQL statements that converts the data value
+      # from integer, string, or UUID to valid INTEGER as per Postgres guidelines
+      #
+      # @param column [Symbol]
+      # @return [String]
+      def to_integer_pg(column)
+        "CAST(coalesce(replace(text(#{column}),'-',''), '') AS integer)"
       end
     end
   end
